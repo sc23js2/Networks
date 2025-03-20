@@ -1,34 +1,3 @@
-/*
- * Copyright (c) 1995 - 2008 Sun Microsystems, Inc.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *   - Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *
- *   - Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *
- *   - Neither the name of Sun Microsystems nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 import java.net.*;
 import java.sql.Time;
 
@@ -36,14 +5,15 @@ import javax.swing.plaf.synth.SynthStyle;
 
 import java.io.*;
 import java.util.Date;
-import java.time.*;;
+import java.time.*;
+
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.Lock;
 
 public class ServerProtocol {
 
-    private static final int WELCOME = 0;
-    private static final int PENDING = 1;
-    private static final int VOTED = 2;
-    private static final int LIST = 3;
+    private static final int PENDING = 1; //(waiting for vote)
+    private static final int LIST = 2;
 
     private int state = PENDING;
 
@@ -59,18 +29,24 @@ public class ServerProtocol {
     private static InetAddress ip;
     private static String ipAddress;
 
+    private final Lock lock = new ReentrantLock();
+
     public void makeFile() {
+
         try {
+            //create log file
             logFile = new File("log.txt");
 
+            //if the file already exists then delete it
             if (logFile.exists())
             {
-                System.out.println("File already exists. Deleleting and creating new one.");
+                //System.out.println("File already exists. Deleleting and creating new one.");
                 logFile.delete();
             }
-        
+
+            //create new log file
             if (logFile.createNewFile()) {
-                System.out.println("File created: " + logFile.getName());
+                System.out.println("File created.");
             } 
             else
             {
@@ -84,7 +60,8 @@ public class ServerProtocol {
         }
     }
 
-    private void logAction(String request) {
+    private synchronized void logAction(String request) {
+
         try {
             //Create file Writer
             myWriter = new FileWriter(logFile, true);
@@ -97,9 +74,10 @@ public class ServerProtocol {
             ip = InetAddress.getLocalHost();
             ipAddress = ip.getHostAddress();
 
-            //date|time|client IP address|request
+            //create string date|time|client IP address|request
             String logString = date + "|" + time + "|" + ipAddress + "|" + request + "\n";
 
+            //write string to logfile and close file
             myWriter.write(logString);
             myWriter.close();
             System.out.println("Request logged in file.");
@@ -117,32 +95,39 @@ public class ServerProtocol {
         
         //all votes should initially be 0
         pollResults = new int[voteOptions.length];
-
+        //set all votes to 0
         for(int i = 0; i < pollResults.length; i++) {
             pollResults[i] = 0; 
         }
 
         System.out.println("Poll created with " + voteOptions.length + " options.");
-        state = WELCOME;
+        state = PENDING;
 
         return 1; //success
     }
 
-    public String listOptions() {
+    public synchronized String listOptions() {
 
         String list = "The Poll: ";
+
+        //lock the poll results for synchronisation
+        lock.lock();
 
         for (int i = 0; i < pollOptions.length; i++) {
             list += (" '" + pollOptions[i] + "' has " + pollResults[i] + " votes, ");
         }
 
-        list += "\n";
+        //unlock the poll results
+        lock.unlock();
 
+        list += "\n";
         System.out.println("list created");
         return list;
     }
 
     public int validateVote(String voteOption) {
+
+        //check if the vote is in the poll options
 
         for (int i = 0; i < pollOptions.length; i++) {
             if (pollOptions[i].equalsIgnoreCase(voteOption)) {
@@ -153,15 +138,22 @@ public class ServerProtocol {
         return 0; //invalid
     }
 
-    public String vote(String voteOption) {
+    public synchronized String vote(String voteOption) {
 
         System.out.println("voting...");
 
         for (int i = 0; i < pollOptions.length; i++) {
             if (pollOptions[i].equalsIgnoreCase(voteOption)) {
 
+                //lock the poll results
+                lock.lock();
+
                 //increase poll count in corresponding position
                 pollResults[i]++;
+
+                //unlock the poll results
+                lock.unlock();
+
                 return "You cast your vote for: " + voteOption;
             }
         }
@@ -169,8 +161,12 @@ public class ServerProtocol {
         return "Error: Vote " + voteOption + " not found.";
     }
 
-    public String getWord(String theInput, int wordNumber)
-    {   
+    //gets the word at the specified position in a string
+    public String getWord(String theInput, int wordNumber) {   
+        //EXAMPLE USAGE --
+        //getWord("vote chicken", 1) will return "vote"
+        //getWord("vote chicken", 2) will return "chicken"
+
         //if we are looking for word number 1, then we need to count 0 spaces before parsing.
         //if we are looking for word number 2 then we need to count 1 space before parsing.
         int numOfSpaces = 0;
@@ -202,25 +198,24 @@ public class ServerProtocol {
         
         String theOutput = null;
 
+        //if input is null then there is nothing to process or log. set state to -1 to give error message before exit
         if (theInput == null)
         {
             state = -1;
         }
         else //get state list or vote.
         {
-
-            if (getWord(theInput, 1).equalsIgnoreCase("list")) 
+            if (getWord(theInput, 1).equalsIgnoreCase("list")) //if first word is list
             {
                 state = LIST;
             }
-            else if (getWord(theInput, 1).equalsIgnoreCase("vote") && state != VOTED) //you cant vote twice
+            else if (getWord(theInput, 1).equalsIgnoreCase("vote") ) //if first word is vote
             {
                 state = PENDING;
             }
             else {
 
-                if (state != VOTED) //dont say invalif input if they have already voted
-                    state = -1; //switch will default
+                state = -1; //switch will default to error message
             }
         }
     
@@ -235,17 +230,11 @@ public class ServerProtocol {
             case PENDING:
                 theOutput = vote(getWord(theInput, 2));
 
-                //only log and change state if valid
-                if (validateVote(getWord(theInput, 2)) == 1)
+                //only log if valid vote
+                if (validateVote(getWord(theInput, 2)) == 1) //1 is valid 
                 {
-                    state = VOTED;
                     logAction("vote");
                 }                        
-               
-                break;
-
-            case VOTED:
-                theOutput = "You have already voted.";
                 break;
 
             default:

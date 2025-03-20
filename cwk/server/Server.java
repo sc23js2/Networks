@@ -1,36 +1,4 @@
-/*
- * Copyright (c) 1995 - 2008 Sun Microsystems, Inc.  All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *   - Redistributions of source code must retain the above copyright
- *     notice, this list of conditions and the following disclaimer.
- *
- *   - Redistributions in binary form must reproduce the above copyright
- *     notice, this list of conditions and the following disclaimer in the
- *     documentation and/or other materials provided with the distribution.
- *
- *   - Neither the name of Sun Microsystems nor the names of its
- *     contributors may be used to endorse or promote products derived
- *     from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
- * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 import java.net.*;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.*;
@@ -40,7 +8,7 @@ public class Server {
 
     private ServerSocket serverSocket = null;
     private ServerProtocol sp = null;
-    private ExecutorService service = null;
+    private ExecutorService threadPool = null;
 
     public Server(String[] voteOptions) {
 
@@ -54,12 +22,12 @@ public class Server {
         }
         System.out.println("Socket initalised.");
 
-        //crete executor service with 30 threads
+        //create executor threadPool with 30 threads
         try {
-            service = Executors.newFixedThreadPool(30);
+            threadPool = Executors.newFixedThreadPool(30);
         }
         catch (Exception e) {
-            System.err.println("Could not create executor service.");
+            System.err.println("Could not create executor threadPool.");
             System.exit(1);
         }
 
@@ -100,9 +68,10 @@ public class Server {
     public Socket acceptClient() {
         Socket clientSocket = null;
 
+        //accept client on thread
         try {
             clientSocket = serverSocket.accept();
-            service.submit( new ClientHandler(clientSocket) );
+            threadPool.submit( new ClientHandler(clientSocket, sp) );
         }
         catch (IOException e) {
             System.err.println("Accept failed.");
@@ -116,44 +85,30 @@ public class Server {
 
         Socket clientSocket = null;
 
-        while( true ){
+        while( true ) {
 
+            //call subroutine accept client
             clientSocket = acceptClient();
+
+            //print address and port on server terminal
             System.out.println("clientSocket address: " + clientSocket.getInetAddress() );
             System.out.println("clientSocket port: " + clientSocket.getPort() );
 
-            try {
-                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
-                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-
-                String inputLine, outputLine;
-
-                //read input
-                inputLine = in.readLine();
-                
-                //process input to get output
-                outputLine = sp.processInput(inputLine);
-                out.println(outputLine);
-                     
-                out.close();
-                in.close();
-                clientSocket.close();
-            }
-            catch (IOException e) {
-                System.out.println( e );
-            }
         }
     }
 
     public static void main( String[] args ) {
 
+        //check args length
         if (args.length < 2) {
             System.err.println("To open a vote you must provide at least 2 poll options.\n Usage: java Server <option1> <option2> ... <optionN>");
             System.exit(1);
         }
         
+        //create server
         Server votingServer = new Server(args);
 
+        //run server
         votingServer.runServer();
     }
 }
